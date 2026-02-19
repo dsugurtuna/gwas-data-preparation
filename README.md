@@ -1,0 +1,92 @@
+# GWAS Data Preparation
+
+[![CI](https://github.com/dsugurtuna/gwas-data-preparation/actions/workflows/ci.yml/badge.svg)](https://github.com/dsugurtuna/gwas-data-preparation/actions/workflows/ci.yml)
+
+**Multi-batch genotype assembly, quality control, and format conversion for genome-wide association studies.**
+
+Prepares genotype data for GWAS by merging multiple array batches, applying standard QC filters (call rate, MAF, HWE, heterozygosity, relatedness), resolving strand conflicts, and converting between PLINK and VCF formats.
+
+> **Portfolio project.** Built as a generalised demonstration of GWAS preparation workflows. No real participant data is included.
+
+---
+
+## Architecture
+
+```
+src/gwas_prep/
+    __init__.py       # Public API exports
+    assembler.py      # Multi-batch merging with strand conflict resolution
+    qc.py             # GWAS QC pipeline (call rate, MAF, HWE, het, sex, IBD)
+    converter.py      # PLINK ↔ VCF format conversion
+tests/
+    test_assembler.py  # Assembly and strand conflict tests
+    test_qc.py         # QC filter and report tests
+```
+
+---
+
+## Quick start
+
+```bash
+pip install -e ".[dev]"
+pytest -v
+```
+
+### Python API
+
+```python
+from gwas_prep import GenotypeAssembler, QualityController, FormatConverter
+
+# Merge multiple genotyping batches
+assembler = GenotypeAssembler(plink_path="plink")
+result = assembler.merge_batches(
+    ["batch1", "batch2", "batch3"],
+    output_prefix="merged"
+)
+print(f"Merged {result.batches_merged} batches, {result.total_samples} samples")
+
+# Apply QC filters
+qc = QualityController(call_rate_variant=0.98, maf_threshold=0.01)
+failed_vars = qc.check_variant_call_rates("merged.lmiss")
+failed_maf = qc.check_maf("merged.frq")
+
+# Generate QC report
+report = qc.generate_report(
+    initial_samples=5000, initial_variants=800000,
+    failed_variants={"call_rate": failed_vars, "maf": failed_maf},
+    failed_samples={},
+)
+print(f"Pass rate: {report.variant_pass_rate:.1%} variants, {report.sample_pass_rate:.1%} samples")
+```
+
+---
+
+## Key features
+
+| Feature | Detail |
+| :--- | :--- |
+| **Multi-batch merge** | PLINK --bmerge with automatic strand-flip retry on missnp conflicts |
+| **Strand conflict detection** | Identifies A/T and C/G ambiguous variants between batches |
+| **Variant QC** | Call rate, MAF, HWE filtering via PLINK output file parsing |
+| **Sample QC** | Call rate, heterozygosity outliers, sex discordance, relatedness |
+| **Format conversion** | PLINK binary ↔ VCF via PLINK and bcftools wrappers |
+| **QC reporting** | Structured QCReport with pass rates and per-filter removal counts |
+
+## Development
+
+```bash
+make dev        # install with dev dependencies
+make test       # run pytest
+make lint       # run ruff
+make clean      # remove build artefacts
+```
+
+## Jira provenance
+
+| Ticket | Description |
+| :--- | :--- |
+| BIOIN-618 | GWAS data preparation and delivery for academic collaborators |
+
+---
+
+*Created by [dsugurtuna](https://github.com/dsugurtuna)*
