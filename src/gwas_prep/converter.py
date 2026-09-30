@@ -9,7 +9,6 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -23,7 +22,7 @@ class ConversionResult:
     sample_count: int = 0
     variant_count: int = 0
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class FormatConverter:
@@ -59,9 +58,12 @@ class FormatConverter:
         )
         cmd = [
             self.plink_path,
-            "--bfile", str(bfile),
-            "--recode", "vcf",
-            "--out", str(Path(output_vcf).with_suffix("")),
+            "--bfile",
+            str(bfile),
+            "--recode",
+            "vcf",
+            "--out",
+            str(Path(output_vcf).with_suffix("")),
             "--allow-no-sex",
         ]
         try:
@@ -86,9 +88,11 @@ class FormatConverter:
         )
         cmd = [
             self.plink_path,
-            "--vcf", str(vcf_path),
+            "--vcf",
+            str(vcf_path),
             "--make-bed",
-            "--out", str(output_prefix),
+            "--out",
+            str(output_prefix),
             "--allow-no-sex",
         ]
         try:

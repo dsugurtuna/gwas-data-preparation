@@ -2,9 +2,9 @@
 
 __version__ = "1.0.0"
 
-from .assembler import GenotypeAssembler, AssemblyResult
-from .qc import QualityController, QCReport
-from .converter import FormatConverter, ConversionResult
+from .assembler import AssemblyResult, GenotypeAssembler
+from .converter import ConversionResult, FormatConverter
+from .qc import QCReport, QualityController
 
 __all__ = [
     "GenotypeAssembler",

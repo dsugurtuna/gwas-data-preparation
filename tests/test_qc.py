@@ -1,6 +1,6 @@
 """Tests for QualityController."""
 
-from gwas_prep.qc import QualityController, QCReport
+from gwas_prep.qc import QCReport, QualityController
 
 
 class TestQualityController:
@@ -33,9 +33,7 @@ class TestQualityController:
     def test_check_maf(self, tmp_path):
         frq = tmp_path / "data.frq"
         frq.write_text(
-            "CHR SNP A1 A2 MAF NCHROBS\n"
-            "1 rs1 A G 0.15 200\n"
-            "1 rs2 C T 0.005 200\n"
+            "CHR SNP A1 A2 MAF NCHROBS\n1 rs1 A G 0.15 200\n1 rs2 C T 0.005 200\n"
         )
         qc = QualityController(maf_threshold=0.01)
         failed = qc.check_maf(frq)
@@ -66,7 +64,12 @@ class TestQCReport:
         assert report.removed_hwe_variants == 2
 
     def test_pass_rates(self):
-        r = QCReport(initial_samples=100, initial_variants=1000, final_samples=90, final_variants=950)
+        r = QCReport(
+            initial_samples=100,
+            initial_variants=1000,
+            final_samples=90,
+            final_variants=950,
+        )
         assert r.sample_pass_rate == 0.9
         assert r.variant_pass_rate == 0.95
 

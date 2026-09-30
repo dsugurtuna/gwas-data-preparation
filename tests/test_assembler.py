@@ -1,6 +1,6 @@
 """Tests for GenotypeAssembler."""
 
-from gwas_prep.assembler import GenotypeAssembler, AssemblyResult
+from gwas_prep.assembler import AssemblyResult, GenotypeAssembler
 
 
 class TestGenotypeAssembler:
@@ -23,9 +23,13 @@ class TestGenotypeAssembler:
 
     def test_detect_strand_conflicts(self, tmp_path):
         bim_a = tmp_path / "a.bim"
-        bim_a.write_text("1\trs1\t0\t100\tA\tT\n1\trs2\t0\t200\tC\tG\n1\trs3\t0\t300\tA\tG\n")
+        bim_a.write_text(
+            "1\trs1\t0\t100\tA\tT\n1\trs2\t0\t200\tC\tG\n1\trs3\t0\t300\tA\tG\n"
+        )
         bim_b = tmp_path / "b.bim"
-        bim_b.write_text("1\trs1\t0\t100\tT\tA\n1\trs2\t0\t200\tG\tC\n1\trs3\t0\t300\tA\tG\n")
+        bim_b.write_text(
+            "1\trs1\t0\t100\tT\tA\n1\trs2\t0\t200\tG\tC\n1\trs3\t0\t300\tA\tG\n"
+        )
         ga = GenotypeAssembler()
         conflicts = ga.detect_strand_conflicts(bim_a, bim_b)
         assert "rs1" in conflicts

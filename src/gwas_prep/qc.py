@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Set
 
 
 @dataclass
@@ -78,14 +77,12 @@ class QualityController:
         self.het_sd = het_sd
         self.pi_hat = pi_hat
 
-    def check_variant_call_rates(
-        self, lmiss_path: str | Path
-    ) -> Set[str]:
+    def check_variant_call_rates(self, lmiss_path: str | Path) -> set[str]:
         """Parse PLINK .lmiss file and return variants below threshold.
 
         The .lmiss file columns: CHR, SNP, N_MISS, N_GENO, F_MISS
         """
-        failed: Set[str] = set()
+        failed: set[str] = set()
         with open(lmiss_path) as fh:
             header = True
             for line in fh:
@@ -99,14 +96,12 @@ class QualityController:
                         failed.add(parts[1])
         return failed
 
-    def check_sample_call_rates(
-        self, imiss_path: str | Path
-    ) -> Set[str]:
+    def check_sample_call_rates(self, imiss_path: str | Path) -> set[str]:
         """Parse PLINK .imiss file and return samples below threshold.
 
         The .imiss file columns: FID, IID, MISS_PHENO, N_MISS, N_GENO, F_MISS
         """
-        failed: Set[str] = set()
+        failed: set[str] = set()
         with open(imiss_path) as fh:
             header = True
             for line in fh:
@@ -120,12 +115,12 @@ class QualityController:
                         failed.add(parts[1])
         return failed
 
-    def check_maf(self, frq_path: str | Path) -> Set[str]:
+    def check_maf(self, frq_path: str | Path) -> set[str]:
         """Parse PLINK .frq file and return variants below MAF threshold.
 
         Columns: CHR, SNP, A1, A2, MAF, NCHROBS
         """
-        failed: Set[str] = set()
+        failed: set[str] = set()
         with open(frq_path) as fh:
             header = True
             for line in fh:
@@ -143,8 +138,8 @@ class QualityController:
         self,
         initial_samples: int,
         initial_variants: int,
-        failed_variants: Dict[str, Set[str]],
-        failed_samples: Dict[str, Set[str]],
+        failed_variants: dict[str, set[str]],
+        failed_samples: dict[str, set[str]],
     ) -> QCReport:
         """Summarise QC filtering into a report."""
         report = QCReport(
@@ -152,18 +147,24 @@ class QualityController:
             initial_variants=initial_variants,
         )
 
-        all_failed_variants: Set[str] = set()
-        report.removed_low_call_rate_variants = len(failed_variants.get("call_rate", set()))
+        all_failed_variants: set[str] = set()
+        report.removed_low_call_rate_variants = len(
+            failed_variants.get("call_rate", set())
+        )
         all_failed_variants |= failed_variants.get("call_rate", set())
         report.removed_low_maf_variants = len(failed_variants.get("maf", set()))
         all_failed_variants |= failed_variants.get("maf", set())
         report.removed_hwe_variants = len(failed_variants.get("hwe", set()))
         all_failed_variants |= failed_variants.get("hwe", set())
 
-        all_failed_samples: Set[str] = set()
-        report.removed_low_call_rate_samples = len(failed_samples.get("call_rate", set()))
+        all_failed_samples: set[str] = set()
+        report.removed_low_call_rate_samples = len(
+            failed_samples.get("call_rate", set())
+        )
         all_failed_samples |= failed_samples.get("call_rate", set())
-        report.removed_het_outlier_samples = len(failed_samples.get("heterozygosity", set()))
+        report.removed_het_outlier_samples = len(
+            failed_samples.get("heterozygosity", set())
+        )
         all_failed_samples |= failed_samples.get("heterozygosity", set())
         report.removed_sex_discordance_samples = len(failed_samples.get("sex", set()))
         all_failed_samples |= failed_samples.get("sex", set())

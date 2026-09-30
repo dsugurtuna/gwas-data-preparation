@@ -10,7 +10,6 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -24,7 +23,7 @@ class AssemblyResult:
     strand_flips: int = 0
     excluded_variants: int = 0
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class GenotypeAssembler:
@@ -67,16 +66,16 @@ class GenotypeAssembler:
 
     def detect_strand_conflicts(
         self, bim_a: str | Path, bim_b: str | Path
-    ) -> List[str]:
+    ) -> list[str]:
         """Identify variants with strand conflicts between two .bim files.
 
         Returns a list of variant IDs that have complementary allele
         encodings (A/T ↔ T/A, C/G ↔ G/C), indicating strand ambiguity.
         """
         complement = {"A": "T", "T": "A", "C": "G", "G": "C"}
-        conflicts: List[str] = []
+        conflicts: list[str] = []
 
-        variants_a: Dict[str, tuple] = {}
+        variants_a: dict[str, tuple] = {}
         with open(bim_a) as fh:
             for line in fh:
                 parts = line.strip().split("\t")
@@ -91,16 +90,15 @@ class GenotypeAssembler:
                     if vid in variants_a:
                         a1_a, a2_a = variants_a[vid]
                         a1_b, a2_b = parts[4], parts[5]
-                        if (
-                            a1_a == complement.get(a1_b, "")
-                            and a2_a == complement.get(a2_b, "")
+                        if a1_a == complement.get(a1_b, "") and a2_a == complement.get(
+                            a2_b, ""
                         ):
                             conflicts.append(vid)
         return conflicts
 
     def merge_batches(
         self,
-        batch_prefixes: List[str | Path],
+        batch_prefixes: list[str | Path],
         output_prefix: str | Path,
     ) -> AssemblyResult:
         """Merge multiple PLINK filesets with self-healing strand flip.
@@ -121,10 +119,13 @@ class GenotypeAssembler:
 
         cmd = [
             self.plink_path,
-            "--bfile", str(batch_prefixes[0]),
-            "--merge-list", str(merge_list),
+            "--bfile",
+            str(batch_prefixes[0]),
+            "--merge-list",
+            str(merge_list),
             "--make-bed",
-            "--out", str(output_prefix),
+            "--out",
+            str(output_prefix),
             "--allow-no-sex",
         ]
 
@@ -136,7 +137,9 @@ class GenotypeAssembler:
                 result.strand_flips = sum(1 for _ in open(missnp))
                 exclude_cmd = cmd + ["--exclude", str(missnp)]
                 try:
-                    subprocess.run(exclude_cmd, capture_output=True, text=True, check=True)
+                    subprocess.run(
+                        exclude_cmd, capture_output=True, text=True, check=True
+                    )
                     result.excluded_variants = result.strand_flips
                 except subprocess.CalledProcessError as exc:
                     result.success = False
