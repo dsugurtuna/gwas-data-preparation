@@ -39,10 +39,7 @@ from gwas_prep import GenotypeAssembler, QualityController, FormatConverter
 
 # Merge multiple genotyping batches
 assembler = GenotypeAssembler(plink_path="plink")
-result = assembler.merge_batches(
-    ["batch1", "batch2", "batch3"],
-    output_prefix="merged"
-)
+result = assembler.merge_batches(["batch1", "batch2", "batch3"], output_prefix="merged")
 print(f"Merged {result.batches_merged} batches, {result.total_samples} samples")
 
 # Apply QC filters
@@ -52,11 +49,14 @@ failed_maf = qc.check_maf("merged.frq")
 
 # Generate QC report
 report = qc.generate_report(
-    initial_samples=5000, initial_variants=800000,
+    initial_samples=5000,
+    initial_variants=800000,
     failed_variants={"call_rate": failed_vars, "maf": failed_maf},
     failed_samples={},
 )
-print(f"Pass rate: {report.variant_pass_rate:.1%} variants, {report.sample_pass_rate:.1%} samples")
+print(
+    f"Pass rate: {report.variant_pass_rate:.1%} variants, {report.sample_pass_rate:.1%} samples"
+)
 ```
 
 ---
