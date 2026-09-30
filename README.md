@@ -98,12 +98,6 @@ Upstream of association analysis and of the HLA work in [hla-pipeline-manager](h
 - Add principal-component ancestry checks.
 - Prefer the sample with the lower call rate when breaking relatedness ties.
 
-## Jira provenance
-
-| Ticket | Description |
-| :--- | :--- |
-| BIOIN-618 | GWAS data preparation and delivery for academic collaborators |
-
 ## Licence
 
 MIT is declared in `pyproject.toml`, but no licence file is included yet.
