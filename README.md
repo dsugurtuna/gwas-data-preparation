@@ -55,6 +55,8 @@ print(result.success, result.strand_flips, result.excluded_variants)
 FormatConverter().plink_to_vcf("merged", "merged.vcf.gz")
 ```
 
+I checked this with PLINK v1.90b7.2 on two synthetic batches where one SNP was reported on the opposite strand: `merge_batches` flipped that SNP in the second batch and merged all 10 samples with consistent alleles, while a plain `plink --merge-list` of the same batches failed. The VCF round trip kept the sample IDs.
+
 ## How it works
 
 ```mermaid
