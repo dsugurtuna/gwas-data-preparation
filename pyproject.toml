@@ -1,18 +1,19 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gwas-data-preparation"
-version = "1.0.0"
-description = "Multi-batch genotype assembly, QC filtering, and format conversion for GWAS."
+version = "1.1.0"
+description = "Merge genotyping batches with strand checks, apply PLINK-based GWAS QC and convert to VCF."
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [{name = "Ugur Tuna"}]
+dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.4"]
+dev = ["pytest>=8.0", "ruff==0.16.9", "mypy>=1.11"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -21,5 +22,13 @@ where = ["src"]
 testpaths = ["tests"]
 
 [tool.ruff]
-target-version = "py39"
-line-length = 120
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+strict = true
