@@ -2,84 +2,99 @@
 
 [![CI](https://github.com/dsugurtuna/gwas-data-preparation/actions/workflows/ci.yml/badge.svg)](https://github.com/dsugurtuna/gwas-data-preparation/actions/workflows/ci.yml)
 
-**Multi-batch genotype assembly, quality control, and format conversion for genome-wide association studies.**
-
-Prepares genotype data for GWAS by merging multiple array batches, applying standard QC filters (call rate, MAF, HWE, heterozygosity, relatedness), resolving strand conflicts, and converting between PLINK and VCF formats.
+Merge genotyping batches with explicit strand checks, apply standard GWAS quality control from PLINK 1.9 reports, and convert to VCF without losing sample IDs or reference alleles.
 
 > **Portfolio project.** Built as a generalised demonstration of GWAS preparation workflows. No real participant data is included.
 
----
+## The problem
 
-## Architecture
+Preparing array data for a genome-wide association study means merging batches that may not agree on strand, removing poor variants and samples with the usual QC filters, and handing over files that other tools read correctly. Each step has a well-known trap: blind strand flips, related samples left in, VCF sample IDs silently split at an underscore.
 
-```
-src/gwas_prep/
-    __init__.py       # Public API exports
-    assembler.py      # Multi-batch merging with strand conflict resolution
-    qc.py             # GWAS QC pipeline (call rate, MAF, HWE, het, sex, IBD)
-    converter.py      # PLINK ↔ VCF format conversion
-tests/
-    test_assembler.py  # Assembly and strand conflict tests
-    test_qc.py         # QC filter and report tests
-```
+## What this does
 
----
+- **Strand check before merging.** Compares each batch's `.bim` with the first batch and sorts shared SNPs into flipped (fixed with `plink --flip` on that batch only), ambiguous A/T and C/G (reported, optionally excluded) and incompatible (excluded). Then merges once with `plink --merge-list`.
+- **QC from PLINK reports.** Variant and sample call rate (`--missing`), minor allele frequency (`--freq`), Hardy-Weinberg (`--hardy`, all samples or controls only), heterozygosity outliers (`--het`), sex discordance (`--check-sex`) and relatedness (`--genome`, removing as few samples as possible), plus a summary that counts each removal once.
+- **VCF conversion** with `--double-id` on import and `--recode vcf-iid --keep-allele-order` on export.
 
-## Quick start
+## Quickstart
+
+Runs on the synthetic PLINK report files in [`examples/`](examples/README.md); PLINK is not needed for this.
 
 ```bash
+git clone https://github.com/dsugurtuna/gwas-data-preparation.git
+cd gwas-data-preparation
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -v
+pytest
+python examples/qc_demo.py
 ```
 
-### Python API
+Output (every failure is planted in the synthetic data):
+
+```text
+variant call_rate       ['rs100007']
+variant maf             ['rs100021', 'rs100022']
+variant hwe             ['rs100033']
+sample call_rate       ['SYN013']
+sample heterozygosity  ['SYN027']
+sample sex             ['SYN031']
+sample relatedness     ['SYN004']
+variants kept 56/60, samples kept 36/40
+strand: flipped ['rs1'], ambiguous ['rs3'], incompatible ['rs4']
+```
+
+Merging and conversion call PLINK 1.9 (`plink` on the `PATH`, or pass `plink_path`):
 
 ```python
-from gwas_prep import GenotypeAssembler, QualityController, FormatConverter
+from gwas_prep import FormatConverter, GenotypeAssembler
 
-# Merge multiple genotyping batches
-assembler = GenotypeAssembler(plink_path="plink")
-result = assembler.merge_batches(["batch1", "batch2", "batch3"], output_prefix="merged")
-print(f"Merged {result.batches_merged} batches, {result.total_samples} samples")
-
-# Apply QC filters
-qc = QualityController(call_rate_variant=0.98, maf_threshold=0.01)
-failed_vars = qc.check_variant_call_rates("merged.lmiss")
-failed_maf = qc.check_maf("merged.frq")
-
-# Generate QC report
-report = qc.generate_report(
-    initial_samples=5000,
-    initial_variants=800000,
-    failed_variants={"call_rate": failed_vars, "maf": failed_maf},
-    failed_samples={},
+result = GenotypeAssembler(work_dir="work").merge_batches(
+    ["batch1", "batch2", "batch3"], "merged", exclude_ambiguous=False
 )
-print(
-    f"Pass rate: {report.variant_pass_rate:.1%} variants, {report.sample_pass_rate:.1%} samples"
-)
+print(result.success, result.strand_flips, result.excluded_variants)
+FormatConverter().plink_to_vcf("merged", "merged.vcf.gz")
 ```
 
----
+## How it works
 
-## Key features
-
-| Feature | Detail |
-| :--- | :--- |
-| **Multi-batch merge** | PLINK --bmerge with automatic strand-flip retry on missnp conflicts |
-| **Strand conflict detection** | Identifies A/T and C/G ambiguous variants between batches |
-| **Variant QC** | Call rate, MAF, HWE filtering via PLINK output file parsing |
-| **Sample QC** | Call rate, heterozygosity outliers, sex discordance, relatedness |
-| **Format conversion** | PLINK binary ↔ VCF via PLINK and bcftools wrappers |
-| **QC reporting** | Structured QCReport with pass rates and per-filter removal counts |
-
-## Development
-
-```bash
-make dev        # install with dev dependencies
-make test       # run pytest
-make lint       # run ruff
-make clean      # remove build artefacts
+```mermaid
+flowchart LR
+    B1[batch 1 .bim<br/>reference] --> C{compare each shared SNP}
+    B2[batch 2..n .bim] --> C
+    C -->|flipped| F[plink --flip<br/>that batch]
+    C -->|ambiguous A/T, C/G| A[report; exclude if asked]
+    C -->|incompatible| X[plink --exclude<br/>every batch]
+    F & A & X --> M[plink --merge-list]
+    M --> Q[PLINK QC reports] --> R[QC checks + summary]
+    M --> V[plink --recode vcf-iid bgz]
 ```
+
+## Design decisions
+
+- **Decide flips from the alleles, per batch.** PLINK's usual recovery (flip everything in `.missnp`, retry, then exclude) is fine for two datasets, but with several batches it can flip a SNP in a batch that was already right. Comparing each batch with one reference avoids that.
+- **Ambiguous SNPs are reported, not silently dropped.** For batches from one array and one pipeline they are usually fine; across arrays they are a real risk. The caller decides with `exclude_ambiguous`.
+- **Columns by header name.** PLINK pads its reports with spaces and column positions differ between commands, so every parser looks columns up by name.
+- **Relatedness by greedy removal.** Removing the sample involved in the most related pairs first keeps more of the cohort than dropping one member of each pair at random.
+- **HWE in controls on request.** In a case-control study, testing HWE in cases can remove genuine association signals, so `check_hwe(..., test="UNAFF")` is available.
+- **PLINK runs through an injectable runner,** so the merge plan and command lines are tested without PLINK installed.
+
+## Limitations and what it is not
+
+- It does not run the PLINK QC commands for you; it reads their output.
+- Ambiguous SNPs are not resolved by allele frequency; they are only reported or removed.
+- Relatedness removal ignores phenotype and call rate when choosing whom to drop.
+- Population structure (principal components, ancestry outliers) is not covered.
+- Multi-allelic variants are out of scope, as they are for PLINK 1.9.
+
+## Where this fits
+
+Upstream of association analysis and of the HLA work in [hla-pipeline-manager](https://github.com/dsugurtuna/hla-pipeline-manager). Format conversion is covered in more depth, with validation, in [vcf-plink-converter](https://github.com/dsugurtuna/vcf-plink-converter); sample and variant QC for sequencing data is in [genomic-qc-toolkit](https://github.com/dsugurtuna/genomic-qc-toolkit).
+
+## Roadmap
+
+- Resolve ambiguous SNPs by comparing allele frequencies with the reference batch.
+- Add principal-component ancestry checks.
+- Prefer the sample with the lower call rate when breaking relatedness ties.
 
 ## Jira provenance
 
@@ -87,6 +102,10 @@ make clean      # remove build artefacts
 | :--- | :--- |
 | BIOIN-618 | GWAS data preparation and delivery for academic collaborators |
 
+## Licence
+
+MIT is declared in `pyproject.toml`, but no licence file is included yet.
+
 ---
 
-*Created by [dsugurtuna](https://github.com/dsugurtuna)*
+Personal project by [Ugur Tuna](https://github.com/dsugurtuna). Not affiliated with or endorsed by any employer.
