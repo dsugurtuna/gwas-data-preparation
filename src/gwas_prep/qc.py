@@ -1,18 +1,51 @@
-"""Quality control module for GWAS datasets.
+"""GWAS quality control from PLINK 1.9 report files.
 
-Applies standard GWAS QC filters: call rate, MAF, HWE, heterozygosity,
-sex discordance, and relatedness.
+Each check reads one PLINK output and returns the IDs that fail:
+
+========================  ==========================  =====================
+Check                     PLINK command               File
+========================  ==========================  =====================
+Variant call rate         ``--missing``               ``.lmiss``
+Sample call rate          ``--missing``               ``.imiss``
+Minor allele frequency    ``--freq``                  ``.frq``
+Hardy-Weinberg            ``--hardy``                 ``.hwe``
+Heterozygosity outliers   ``--het``                   ``.het``
+Sex discordance           ``--check-sex``             ``.sexcheck``
+Relatedness               ``--genome``                ``.genome``
+========================  ==========================  =====================
+
+Columns are found by header name, so PLINK's padded, whitespace-aligned
+output is read correctly.
 """
 
 from __future__ import annotations
 
+import statistics
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 
+def _rows(path: str | Path) -> Iterator[dict[str, str]]:
+    """Yield each data row of a PLINK report as ``{column: value}``."""
+    with open(path) as fh:
+        header = fh.readline().split()
+        for line in fh:
+            parts = line.split()
+            if len(parts) == len(header):
+                yield dict(zip(header, parts, strict=True))
+
+
+def _float(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None  # "NA", "nan" or similar
+
+
 @dataclass
 class QCReport:
-    """Results of quality control filtering."""
+    """Counts before and after QC, and removals per filter."""
 
     initial_samples: int = 0
     initial_variants: int = 0
@@ -40,25 +73,22 @@ class QCReport:
 
 
 class QualityController:
-    """GWAS QC filter pipeline.
-
-    Applies sequential variant and sample-level filters with
-    configurable thresholds.
+    """Threshold PLINK QC reports.
 
     Parameters
     ----------
-    call_rate_variant : float
-        Minimum variant call rate (default 0.98).
-    call_rate_sample : float
-        Minimum sample call rate (default 0.98).
+    call_rate_variant, call_rate_sample : float
+        Minimum call rates (default 0.98).
     maf_threshold : float
         Minimum minor allele frequency (default 0.01).
     hwe_p : float
-        Hardy-Weinberg equilibrium p-value threshold (default 1e-6).
+        Hardy-Weinberg exact test p-value below which a variant fails
+        (default 1e-6).
     het_sd : float
-        Heterozygosity outlier threshold in standard deviations (default 3.0).
+        Standard deviations from the mean inbreeding coefficient F beyond
+        which a sample fails (default 3).
     pi_hat : float
-        Relatedness threshold (default 0.2).
+        Relatedness threshold (default 0.2, roughly second-degree relatives).
     """
 
     def __init__(
@@ -78,61 +108,89 @@ class QualityController:
         self.pi_hat = pi_hat
 
     def check_variant_call_rates(self, lmiss_path: str | Path) -> set[str]:
-        """Parse PLINK .lmiss file and return variants below threshold.
-
-        The .lmiss file columns: CHR, SNP, N_MISS, N_GENO, F_MISS
-        """
-        failed: set[str] = set()
-        with open(lmiss_path) as fh:
-            header = True
-            for line in fh:
-                if header:
-                    header = False
-                    continue
-                parts = line.split()
-                if len(parts) >= 5:
-                    f_miss = float(parts[4])
-                    if (1.0 - f_miss) < self.call_rate_variant:
-                        failed.add(parts[1])
-        return failed
+        """Variants whose call rate (1 - F_MISS) is below the threshold."""
+        return {
+            r["SNP"]
+            for r in _rows(lmiss_path)
+            if (f := _float(r["F_MISS"])) is not None
+            and 1.0 - f < self.call_rate_variant
+        }
 
     def check_sample_call_rates(self, imiss_path: str | Path) -> set[str]:
-        """Parse PLINK .imiss file and return samples below threshold.
-
-        The .imiss file columns: FID, IID, MISS_PHENO, N_MISS, N_GENO, F_MISS
-        """
-        failed: set[str] = set()
-        with open(imiss_path) as fh:
-            header = True
-            for line in fh:
-                if header:
-                    header = False
-                    continue
-                parts = line.split()
-                if len(parts) >= 6:
-                    f_miss = float(parts[5])
-                    if (1.0 - f_miss) < self.call_rate_sample:
-                        failed.add(parts[1])
-        return failed
+        """Samples (IID) whose call rate is below the threshold."""
+        return {
+            r["IID"]
+            for r in _rows(imiss_path)
+            if (f := _float(r["F_MISS"])) is not None
+            and 1.0 - f < self.call_rate_sample
+        }
 
     def check_maf(self, frq_path: str | Path) -> set[str]:
-        """Parse PLINK .frq file and return variants below MAF threshold.
-
-        Columns: CHR, SNP, A1, A2, MAF, NCHROBS
-        """
+        """Variants with MAF below the threshold (monomorphic 'NA' included)."""
         failed: set[str] = set()
-        with open(frq_path) as fh:
-            header = True
-            for line in fh:
-                if header:
-                    header = False
-                    continue
-                parts = line.split()
-                if len(parts) >= 5:
-                    maf = float(parts[4])
-                    if maf < self.maf_threshold:
-                        failed.add(parts[1])
+        for r in _rows(frq_path):
+            maf = _float(r["MAF"])
+            if maf is None or maf < self.maf_threshold:
+                failed.add(r["SNP"])
         return failed
+
+    def check_hwe(self, hwe_path: str | Path, test: str = "ALL") -> set[str]:
+        """Variants failing Hardy-Weinberg equilibrium.
+
+        ``test`` picks the row type PLINK reports: ``ALL`` for all samples,
+        or ``UNAFF`` to test controls only in a case-control study, which
+        avoids removing true associations that distort HWE in cases.
+        """
+        return {
+            r["SNP"]
+            for r in _rows(hwe_path)
+            if r["TEST"] == test
+            and (p := _float(r["P"])) is not None
+            and p < self.hwe_p
+        }
+
+    def check_heterozygosity(self, het_path: str | Path) -> set[str]:
+        """Samples whose inbreeding coefficient F is more than het_sd SDs from the mean.
+
+        Very low F (excess heterozygosity) often means contamination; very
+        high F can mean poor DNA quality or consanguinity.
+        """
+        f_values = {
+            r["IID"]: f for r in _rows(het_path) if (f := _float(r["F"])) is not None
+        }
+        if len(f_values) < 2:
+            return set()
+        mean = statistics.fmean(f_values.values())
+        sd = statistics.stdev(f_values.values())
+        return {iid for iid, f in f_values.items() if abs(f - mean) > self.het_sd * sd}
+
+    @staticmethod
+    def check_sex(sexcheck_path: str | Path) -> set[str]:
+        """Samples PLINK marks as ``PROBLEM`` (reported and genetic sex differ)."""
+        return {r["IID"] for r in _rows(sexcheck_path) if r["STATUS"] == "PROBLEM"}
+
+    def check_relatedness(self, genome_path: str | Path) -> set[str]:
+        """Samples to remove so that no pair has PI_HAT above the threshold.
+
+        Greedy: repeatedly remove the sample involved in the most remaining
+        related pairs (ties broken by ID), which usually removes fewer people
+        than dropping one member of every pair at random.
+        """
+        pairs: set[tuple[str, str]] = set()
+        for r in _rows(genome_path):
+            pi = _float(r["PI_HAT"])
+            if pi is not None and pi > self.pi_hat:
+                pairs.add((r["IID1"], r["IID2"]))
+        removed: set[str] = set()
+        while pairs:
+            degree: dict[str, int] = {}
+            for a, b in pairs:
+                degree[a] = degree.get(a, 0) + 1
+                degree[b] = degree.get(b, 0) + 1
+            worst = min(degree, key=lambda s: (-degree[s], s))
+            removed.add(worst)
+            pairs = {p for p in pairs if worst not in p}
+        return removed
 
     def generate_report(
         self,
@@ -141,36 +199,24 @@ class QualityController:
         failed_variants: dict[str, set[str]],
         failed_samples: dict[str, set[str]],
     ) -> QCReport:
-        """Summarise QC filtering into a report."""
-        report = QCReport(
+        """Summarise removals. Keys: call_rate, maf, hwe for variants;
+        call_rate, heterozygosity, sex, relatedness for samples. Final counts
+        subtract the union, so an ID failing two filters is removed once."""
+        fv = {k: failed_variants.get(k, set()) for k in ("call_rate", "maf", "hwe")}
+        fs = {
+            k: failed_samples.get(k, set())
+            for k in ("call_rate", "heterozygosity", "sex", "relatedness")
+        }
+        return QCReport(
             initial_samples=initial_samples,
             initial_variants=initial_variants,
+            removed_low_call_rate_variants=len(fv["call_rate"]),
+            removed_low_maf_variants=len(fv["maf"]),
+            removed_hwe_variants=len(fv["hwe"]),
+            removed_low_call_rate_samples=len(fs["call_rate"]),
+            removed_het_outlier_samples=len(fs["heterozygosity"]),
+            removed_sex_discordance_samples=len(fs["sex"]),
+            removed_related_samples=len(fs["relatedness"]),
+            final_variants=initial_variants - len(set().union(*fv.values())),
+            final_samples=initial_samples - len(set().union(*fs.values())),
         )
-
-        all_failed_variants: set[str] = set()
-        report.removed_low_call_rate_variants = len(
-            failed_variants.get("call_rate", set())
-        )
-        all_failed_variants |= failed_variants.get("call_rate", set())
-        report.removed_low_maf_variants = len(failed_variants.get("maf", set()))
-        all_failed_variants |= failed_variants.get("maf", set())
-        report.removed_hwe_variants = len(failed_variants.get("hwe", set()))
-        all_failed_variants |= failed_variants.get("hwe", set())
-
-        all_failed_samples: set[str] = set()
-        report.removed_low_call_rate_samples = len(
-            failed_samples.get("call_rate", set())
-        )
-        all_failed_samples |= failed_samples.get("call_rate", set())
-        report.removed_het_outlier_samples = len(
-            failed_samples.get("heterozygosity", set())
-        )
-        all_failed_samples |= failed_samples.get("heterozygosity", set())
-        report.removed_sex_discordance_samples = len(failed_samples.get("sex", set()))
-        all_failed_samples |= failed_samples.get("sex", set())
-        report.removed_related_samples = len(failed_samples.get("relatedness", set()))
-        all_failed_samples |= failed_samples.get("relatedness", set())
-
-        report.final_variants = initial_variants - len(all_failed_variants)
-        report.final_samples = initial_samples - len(all_failed_samples)
-        return report
